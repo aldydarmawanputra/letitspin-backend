@@ -86,6 +86,7 @@ func (h *GameHandler) GetHistory(c *gin.Context) {
 	}
 
 	gameCode := c.Query("game_code")
+	resultFilter := c.Query("result")
 
 	page := 1
 	if p := c.Query("page"); p != "" {
@@ -106,7 +107,12 @@ func (h *GameHandler) GetHistory(c *gin.Context) {
 		codePtr = &gameCode
 	}
 
-	sessions, total, err := h.gameService.GetHistory(c.Request.Context(), userID, codePtr, page, limit)
+	var resultPtr *string
+	if resultFilter != "" && (resultFilter == "WIN" || resultFilter == "LOSE") {
+		resultPtr = &resultFilter
+	}
+
+	sessions, total, err := h.gameService.GetHistory(c.Request.Context(), userID, codePtr, resultPtr, page, limit)
 	if err != nil {
 		h.resp.ErrorInternal(c, "failed to get history", err)
 		return

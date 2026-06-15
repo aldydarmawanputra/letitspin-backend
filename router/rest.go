@@ -32,7 +32,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	configRepo := gameRepository.NewConfigRepository(db)
 
 	walletSvc := walletService.NewWalletService(walletRepo)
-	gameSvc := gameService.NewGameService(gameRepo, walletSvc)
+	gameSvc := gameService.NewGameService(gameRepo, walletRepo, walletSvc)
 
 	slotEngine := slot.NewSlotEngine(configRepo)
 	gameSvc.RegisterEngine(slotEngine)

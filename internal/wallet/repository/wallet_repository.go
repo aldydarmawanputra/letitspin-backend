@@ -83,6 +83,21 @@ func (r *WalletRepository) UpdateBalance(ctx context.Context, tx *sql.Tx, wallet
 	return nil
 }
 
+func (r *WalletRepository) UpdateBalanceDirect(ctx context.Context, tx *sql.Tx, walletID uuid.UUID, newBalance int64) error {
+	query := `
+        UPDATE wallets
+        SET balance = $2, updated_at = NOW()
+        WHERE id = $1
+    `
+
+	_, err := tx.ExecContext(ctx, query, walletID, newBalance)
+	if err != nil {
+		return fmt.Errorf("failed to update balance: %w", err)
+	}
+
+	return nil
+}
+
 func (r *WalletRepository) CreateTransaction(ctx context.Context, tx *sql.Tx, transaction *model.Transaction) error {
 	query := `
 		INSERT INTO transactions (

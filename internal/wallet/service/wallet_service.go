@@ -162,3 +162,27 @@ func (s *WalletService) GetTransactions(ctx context.Context, userID uuid.UUID, p
 
 	return transactions, len(transactions), nil
 }
+
+func (s *WalletService) UpdateBalanceDirect(ctx context.Context, userID uuid.UUID, newBalance int64) error {
+	wallet, err := s.walletRepo.GetWalletByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	tx, err := s.walletRepo.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer s.walletRepo.RollbackTx(tx)
+
+	err = s.walletRepo.UpdateBalance(ctx, tx, wallet.ID, newBalance)
+	if err != nil {
+		return err
+	}
+
+	if err := s.walletRepo.CommitTx(tx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}

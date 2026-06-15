@@ -6,25 +6,28 @@ import (
 	"fmt"
 
 	"let-it-spin/internal/game/base"
-	"let-it-spin/internal/game/repository"
+	gameRepository "let-it-spin/internal/game/repository"
 	"let-it-spin/internal/game/slot"
 	"let-it-spin/internal/model"
-	"let-it-spin/internal/wallet/service"
+	walletRepository "let-it-spin/internal/wallet/repository"
+	walletService "let-it-spin/internal/wallet/service"
 
 	"github.com/google/uuid"
 )
 
 type GameService struct {
-	gameRepo  *repository.GameRepository
-	walletSvc *service.WalletService
-	engines   map[string]base.GameEngine
+	gameRepo   *gameRepository.GameRepository
+	walletRepo *walletRepository.WalletRepository
+	walletSvc  *walletService.WalletService
+	engines    map[string]base.GameEngine
 }
 
-func NewGameService(gameRepo *repository.GameRepository, walletSvc *service.WalletService) *GameService {
+func NewGameService(gameRepo *gameRepository.GameRepository, walletRepo *walletRepository.WalletRepository, walletSvc *walletService.WalletService) *GameService {
 	return &GameService{
-		gameRepo:  gameRepo,
-		walletSvc: walletSvc,
-		engines:   make(map[string]base.GameEngine),
+		gameRepo:   gameRepo,
+		walletRepo: walletRepo,
+		walletSvc:  walletSvc,
+		engines:    make(map[string]base.GameEngine),
 	}
 }
 
@@ -91,16 +94,6 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 		return nil, fmt.Errorf("insufficient balance")
 	}
 
-	_, _, err = s.walletSvc.Withdraw(ctx, service.WithdrawRequest{
-		UserID:      userID,
-		Amount:      betAmount,
-		ReferenceID: nil,
-		Description: &[]string{fmt.Sprintf("bet on %s", gameCode)}[0],
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	gameResult, err := engine.Execute(ctx, userID, betAmount, options)
 	if err != nil {
 		return nil, err
@@ -111,6 +104,14 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 		return nil, err
 	}
 
+	balanceBefore := wallet.Balance
+	balanceAfter := wallet.Balance - betAmount + gameResult.WinAmount
+
+	result := model.GameResultLose
+	if gameResult.WinAmount > 0 {
+		result = model.GameResultWin
+	}
+
 	tx, err := s.gameRepo.BeginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -118,13 +119,16 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 	defer s.gameRepo.RollbackTx(tx)
 
 	session := &model.GameSession{
-		ID:         uuid.New(),
-		UserID:     userID,
-		GameTypeID: gameType.ID,
-		BetAmount:  betAmount,
-		WinAmount:  gameResult.WinAmount,
-		ResultData: resultData,
-		Status:     model.GameSessionStatusCompleted,
+		ID:            uuid.New(),
+		UserID:        userID,
+		GameTypeID:    gameType.ID,
+		BetAmount:     betAmount,
+		WinAmount:     gameResult.WinAmount,
+		ResultData:    resultData,
+		BalanceBefore: balanceBefore,
+		BalanceAfter:  balanceAfter,
+		Result:        result,
+		Status:        model.GameSessionStatusCompleted,
 	}
 
 	err = s.gameRepo.CreateGameSession(ctx, tx, session)
@@ -132,19 +136,9 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 		return nil, err
 	}
 
-	finalBalance := wallet.Balance - betAmount
-
-	if gameResult.WinAmount > 0 {
-		_, _, err = s.walletSvc.Deposit(ctx, service.DepositRequest{
-			UserID:      userID,
-			Amount:      gameResult.WinAmount,
-			ReferenceID: &[]string{session.ID.String()}[0],
-			Description: &[]string{fmt.Sprintf("win on %s", gameCode)}[0],
-		})
-		if err != nil {
-			return nil, err
-		}
-		finalBalance = finalBalance + gameResult.WinAmount
+	err = s.walletRepo.UpdateBalance(ctx, tx, wallet.ID, balanceAfter)
+	if err != nil {
+		return nil, err
 	}
 
 	if err := s.gameRepo.CommitTx(tx); err != nil {
@@ -158,11 +152,11 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 		WinAmount: gameResult.WinAmount,
 		IsWin:     gameResult.WinAmount > 0,
 		Details:   gameResult.Details,
-		Balance:   finalBalance,
+		Balance:   balanceAfter,
 	}, nil
 }
 
-func (s *GameService) GetHistory(ctx context.Context, userID uuid.UUID, gameCode *string, page, limit int) ([]model.GameSession, int, error) {
+func (s *GameService) GetHistory(ctx context.Context, userID uuid.UUID, gameCode *string, result *string, page, limit int) ([]model.GameSession, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -181,7 +175,7 @@ func (s *GameService) GetHistory(ctx context.Context, userID uuid.UUID, gameCode
 		gameTypeID = &gameType.ID
 	}
 
-	sessions, err := s.gameRepo.GetGameSessions(ctx, userID, gameTypeID, limit, offset)
+	sessions, err := s.gameRepo.GetGameSessions(ctx, userID, gameTypeID, result, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

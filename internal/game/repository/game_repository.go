@@ -50,8 +50,11 @@ func (r *GameRepository) GetGameTypeByCode(ctx context.Context, code string) (*m
 
 func (r *GameRepository) CreateGameSession(ctx context.Context, tx *sql.Tx, session *model.GameSession) error {
 	query := `
-        INSERT INTO game_sessions (id, user_id, game_type_id, bet_amount, win_amount, result_data, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO game_sessions (
+            id, user_id, game_type_id, bet_amount, win_amount, 
+            result_data, balance_before, balance_after, result, status
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     `
 
 	_, err := tx.ExecContext(ctx, query,
@@ -61,6 +64,9 @@ func (r *GameRepository) CreateGameSession(ctx context.Context, tx *sql.Tx, sess
 		session.BetAmount,
 		session.WinAmount,
 		session.ResultData,
+		session.BalanceBefore,
+		session.BalanceAfter,
+		session.Result,
 		session.Status,
 	)
 	if err != nil {
@@ -70,22 +76,40 @@ func (r *GameRepository) CreateGameSession(ctx context.Context, tx *sql.Tx, sess
 	return nil
 }
 
-func (r *GameRepository) GetGameSessions(ctx context.Context, userID uuid.UUID, gameTypeID *uuid.UUID, limit, offset int) ([]model.GameSession, error) {
+func (r *GameRepository) GetGameSessions(ctx context.Context, userID uuid.UUID, gameTypeID *uuid.UUID, result *string, limit, offset int) ([]model.GameSession, error) {
 	var query string
 	var args []interface{}
 
-	if gameTypeID != nil {
+	if gameTypeID != nil && result != nil {
 		query = `
-            SELECT id, user_id, game_type_id, bet_amount, win_amount, result_data, status, created_at
+            SELECT id, user_id, game_type_id, bet_amount, win_amount, result_data, balance_before, balance_after, result, status, created_at
+            FROM game_sessions
+            WHERE user_id = $1 AND game_type_id = $2 AND result = $3
+            ORDER BY created_at DESC
+            LIMIT $4 OFFSET $5
+        `
+		args = []interface{}{userID, gameTypeID, *result, limit, offset}
+	} else if gameTypeID != nil {
+		query = `
+            SELECT id, user_id, game_type_id, bet_amount, win_amount, result_data, balance_before, balance_after, result, status, created_at
             FROM game_sessions
             WHERE user_id = $1 AND game_type_id = $2
             ORDER BY created_at DESC
             LIMIT $3 OFFSET $4
         `
 		args = []interface{}{userID, gameTypeID, limit, offset}
+	} else if result != nil {
+		query = `
+            SELECT id, user_id, game_type_id, bet_amount, win_amount, result_data, balance_before, balance_after, result, status, created_at
+            FROM game_sessions
+            WHERE user_id = $1 AND result = $2
+            ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
+        `
+		args = []interface{}{userID, *result, limit, offset}
 	} else {
 		query = `
-            SELECT id, user_id, game_type_id, bet_amount, win_amount, result_data, status, created_at
+            SELECT id, user_id, game_type_id, bet_amount, win_amount, result_data, balance_before, balance_after, result, status, created_at
             FROM game_sessions
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -110,6 +134,9 @@ func (r *GameRepository) GetGameSessions(ctx context.Context, userID uuid.UUID, 
 			&s.BetAmount,
 			&s.WinAmount,
 			&s.ResultData,
+			&s.BalanceBefore,
+			&s.BalanceAfter,
+			&s.Result,
 			&s.Status,
 			&s.CreatedAt,
 		)
