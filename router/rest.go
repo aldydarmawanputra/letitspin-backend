@@ -7,6 +7,10 @@ import (
 	"let-it-spin/internal/auth/middleware"
 	authRepository "let-it-spin/internal/auth/repository"
 	"let-it-spin/internal/config"
+	gameHandler "let-it-spin/internal/game/handler"
+	gameRepository "let-it-spin/internal/game/repository"
+	gameService "let-it-spin/internal/game/service"
+	"let-it-spin/internal/game/slot"
 	"let-it-spin/internal/handler"
 	"let-it-spin/internal/repository"
 	walletHandler "let-it-spin/internal/wallet/handler"
@@ -24,12 +28,19 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	userRepo := repository.NewUserRepository(db)
 	authRepo := authRepository.NewAuthRepository(db)
 	walletRepo := walletRepository.NewWalletRepository(db)
+	gameRepo := gameRepository.NewGameRepository(db)
+	configRepo := gameRepository.NewConfigRepository(db)
 
 	walletSvc := walletService.NewWalletService(walletRepo)
+	gameSvc := gameService.NewGameService(gameRepo, walletSvc)
+
+	slotEngine := slot.NewSlotEngine(configRepo)
+	gameSvc.RegisterEngine(slotEngine)
 
 	userHandler := handler.NewUserHandler(userRepo)
 	authHandler := handler.NewAuthHandler(authRepo, jwtService)
 	walletHandler := walletHandler.NewWalletHandler(walletSvc)
+	gameHandler := gameHandler.NewGameHandler(gameSvc)
 
 	authMiddleware := middleware.NewAuthMiddleware(jwtService)
 
@@ -67,6 +78,10 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 			protected.POST("/wallet/deposit", walletHandler.Deposit)
 			protected.POST("/wallet/withdraw", walletHandler.Withdraw)
 			protected.GET("/wallet/transactions", walletHandler.GetTransactions)
+
+			protected.GET("/games/:code/config", gameHandler.GetGameConfig)
+			protected.POST("/games/:code/play", gameHandler.Play)
+			protected.GET("/games/history", gameHandler.GetHistory)
 		}
 	}
 
