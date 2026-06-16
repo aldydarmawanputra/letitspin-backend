@@ -10,6 +10,7 @@ import (
 	"let-it-spin/internal/game/dice"
 	gameHandler "let-it-spin/internal/game/handler"
 	gameRepository "let-it-spin/internal/game/repository"
+	"let-it-spin/internal/game/roulette"
 	gameService "let-it-spin/internal/game/service"
 	"let-it-spin/internal/game/slot"
 	"let-it-spin/internal/handler"
@@ -40,6 +41,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 	diceEngine := dice.NewDiceEngine(configRepo)
 	gameSvc.RegisterEngine(diceEngine)
+
+	rouletteEngine := roulette.NewRouletteEngine(configRepo)
+	gameSvc.RegisterEngine(rouletteEngine)
 
 	userHandler := handler.NewUserHandler(userRepo)
 	authHandler := handler.NewAuthHandler(authRepo, jwtService)
