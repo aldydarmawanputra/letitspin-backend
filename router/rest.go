@@ -3,7 +3,9 @@ package router
 import (
 	"database/sql"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"let-it-spin/internal/auth/jwt"
 	"let-it-spin/internal/auth/middleware"
@@ -23,11 +25,27 @@ import (
 	walletService "let-it-spin/internal/wallet/service"
 	"let-it-spin/internal/websocket"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func SetupRouter(db *sql.DB) *gin.Engine {
 	cfg := config.LoadConfig()
+
+	allowOrigins := os.Getenv("CORS_ALLOW_ORIGINS")
+	if allowOrigins == "" {
+		allowOrigins = "http://localhost:3000,http://127.0.0.1:3000"
+	}
+	origins := strings.Split(allowOrigins, ",")
+
+	corsConfig := cors.Config{
+		AllowOrigins:     origins,
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}
 
 	jwtService := jwt.NewJWTService(cfg)
 
@@ -64,6 +82,8 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	authMiddleware := middleware.NewAuthMiddleware(jwtService)
 
 	r := gin.Default()
+
+	r.Use(cors.New(corsConfig))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
