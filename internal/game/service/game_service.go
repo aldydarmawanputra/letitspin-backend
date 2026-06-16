@@ -12,6 +12,7 @@ import (
 	"let-it-spin/internal/model"
 	walletRepository "let-it-spin/internal/wallet/repository"
 	walletService "let-it-spin/internal/wallet/service"
+	"let-it-spin/internal/websocket"
 
 	"github.com/google/uuid"
 )
@@ -21,14 +22,21 @@ type GameService struct {
 	walletRepo *walletRepository.WalletRepository
 	walletSvc  *walletService.WalletService
 	engines    map[string]base.GameEngine
+	wsHub      *websocket.Hub
 }
 
-func NewGameService(gameRepo *gameRepository.GameRepository, walletRepo *walletRepository.WalletRepository, walletSvc *walletService.WalletService) *GameService {
+func NewGameService(
+	gameRepo *gameRepository.GameRepository,
+	walletRepo *walletRepository.WalletRepository,
+	walletSvc *walletService.WalletService,
+	wsHub *websocket.Hub,
+) *GameService {
 	return &GameService{
 		gameRepo:   gameRepo,
 		walletRepo: walletRepo,
 		walletSvc:  walletSvc,
 		engines:    make(map[string]base.GameEngine),
+		wsHub:      wsHub,
 	}
 }
 
@@ -113,7 +121,6 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 		sessionID = uuid.New()
 	}
 
-	// Cek apakah game sudah selesai (bukan PLAYING)
 	isFinal := true
 	if gameCode == "BLACKJACK" {
 		if details, ok := gameResult.Details.(*blackjack.GameState); ok {
@@ -161,6 +168,23 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 		if err := s.gameRepo.CommitTx(tx); err != nil {
 			return nil, err
 		}
+	}
+
+	if s.wsHub != nil {
+		update := map[string]interface{}{
+			"type": "game_update",
+			"payload": map[string]interface{}{
+				"session_id": sessionID.String(),
+				"game_code":  gameCode,
+				"bet_amount": betAmount,
+				"win_amount": gameResult.WinAmount,
+				"is_win":     gameResult.WinAmount > 0,
+				"details":    gameResult.Details,
+				"balance":    balanceAfter,
+			},
+		}
+		data, _ := json.Marshal(update)
+		s.wsHub.SendToUser(userID.String(), data)
 	}
 
 	return &base.GameSessionResult{

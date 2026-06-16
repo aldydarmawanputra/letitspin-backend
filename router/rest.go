@@ -2,6 +2,8 @@ package router
 
 import (
 	"database/sql"
+	"net/http"
+	"strings"
 
 	"let-it-spin/internal/auth/jwt"
 	"let-it-spin/internal/auth/middleware"
@@ -19,6 +21,7 @@ import (
 	walletHandler "let-it-spin/internal/wallet/handler"
 	walletRepository "let-it-spin/internal/wallet/repository"
 	walletService "let-it-spin/internal/wallet/service"
+	"let-it-spin/internal/websocket"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,8 +38,11 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	configRepo := gameRepository.NewConfigRepository(db)
 	bjRepo := blackjack.NewBlackjackRepository(db)
 
-	walletSvc := walletService.NewWalletService(walletRepo)
-	gameSvc := gameService.NewGameService(gameRepo, walletRepo, walletSvc)
+	wsHub := websocket.NewHub()
+	go wsHub.Run()
+
+	walletSvc := walletService.NewWalletService(walletRepo, wsHub)
+	gameSvc := gameService.NewGameService(gameRepo, walletRepo, walletSvc, wsHub)
 
 	slotEngine := slot.NewSlotEngine(configRepo)
 	gameSvc.RegisterEngine(slotEngine)
@@ -61,6 +67,38 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
+	})
+
+	r.GET("/ws", func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		token := ""
+
+		if authHeader != "" {
+			parts := strings.Split(authHeader, " ")
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				token = parts[1]
+			}
+		}
+
+		if token == "" {
+			token = c.Query("token")
+		}
+
+		if token == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "token required"})
+			return
+		}
+
+		claims, err := jwtService.ValidateToken(token)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+
+		c.Set("user_id", claims.UserID)
+		c.Set("email", claims.Email)
+
+		wsHub.HandleWebSocket(c)
 	})
 
 	v1 := r.Group("/api/v1")

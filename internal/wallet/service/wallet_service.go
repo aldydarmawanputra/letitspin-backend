@@ -2,22 +2,26 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"let-it-spin/internal/model"
 	"let-it-spin/internal/wallet/repository"
+	"let-it-spin/internal/websocket"
 
 	"github.com/google/uuid"
 )
 
 type WalletService struct {
 	walletRepo *repository.WalletRepository
+	wsHub      *websocket.Hub
 }
 
-func NewWalletService(walletRepo *repository.WalletRepository) *WalletService {
+func NewWalletService(walletRepo *repository.WalletRepository, wsHub *websocket.Hub) *WalletService {
 	return &WalletService{
 		walletRepo: walletRepo,
+		wsHub:      wsHub,
 	}
 }
 
@@ -81,6 +85,19 @@ func (s *WalletService) Deposit(ctx context.Context, req DepositRequest) (*model
 	}
 
 	wallet.Balance = balanceAfter
+
+	if s.wsHub != nil {
+		update := map[string]interface{}{
+			"type": "balance_update",
+			"payload": map[string]interface{}{
+				"balance":  wallet.Balance,
+				"currency": wallet.Currency,
+			},
+		}
+		data, _ := json.Marshal(update)
+		s.wsHub.SendToUser(req.UserID.String(), data)
+	}
+
 	return wallet, transaction, nil
 }
 
@@ -134,6 +151,19 @@ func (s *WalletService) Withdraw(ctx context.Context, req WithdrawRequest) (*mod
 	}
 
 	wallet.Balance = balanceAfter
+
+	if s.wsHub != nil {
+		update := map[string]interface{}{
+			"type": "balance_update",
+			"payload": map[string]interface{}{
+				"balance":  wallet.Balance,
+				"currency": wallet.Currency,
+			},
+		}
+		data, _ := json.Marshal(update)
+		s.wsHub.SendToUser(req.UserID.String(), data)
+	}
+
 	return wallet, transaction, nil
 }
 
@@ -182,6 +212,18 @@ func (s *WalletService) UpdateBalanceDirect(ctx context.Context, userID uuid.UUI
 
 	if err := s.walletRepo.CommitTx(tx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	if s.wsHub != nil {
+		update := map[string]interface{}{
+			"type": "balance_update",
+			"payload": map[string]interface{}{
+				"balance":  newBalance,
+				"currency": wallet.Currency,
+			},
+		}
+		data, _ := json.Marshal(update)
+		s.wsHub.SendToUser(userID.String(), data)
 	}
 
 	return nil
