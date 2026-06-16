@@ -15,6 +15,7 @@ type GameEngine interface {
 }
 
 type GameResult struct {
+	SessionID  uuid.UUID   `json:"session_id,omitempty"`
 	WinAmount  int64       `json:"win_amount"`
 	IsWin      bool        `json:"is_win"`
 	Details    interface{} `json:"details"`

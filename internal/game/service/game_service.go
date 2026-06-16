@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"let-it-spin/internal/game/base"
+	"let-it-spin/internal/game/blackjack"
 	gameRepository "let-it-spin/internal/game/repository"
 	"let-it-spin/internal/game/slot"
 	"let-it-spin/internal/model"
@@ -107,50 +108,67 @@ func (s *GameService) Play(ctx context.Context, userID uuid.UUID, gameCode strin
 	balanceBefore := wallet.Balance
 	balanceAfter := wallet.Balance - betAmount + gameResult.WinAmount
 
-	result := model.GameResultLose
-	if gameResult.WinAmount > 0 {
-		result = model.GameResultWin
+	sessionID := gameResult.SessionID
+	if sessionID == uuid.Nil {
+		sessionID = uuid.New()
 	}
 
-	tx, err := s.gameRepo.BeginTx(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer s.gameRepo.RollbackTx(tx)
-
-	session := &model.GameSession{
-		ID:            uuid.New(),
-		UserID:        userID,
-		GameTypeID:    gameType.ID,
-		BetAmount:     betAmount,
-		WinAmount:     gameResult.WinAmount,
-		ResultData:    resultData,
-		BalanceBefore: balanceBefore,
-		BalanceAfter:  balanceAfter,
-		Result:        result,
-		Status:        model.GameSessionStatusCompleted,
+	// Cek apakah game sudah selesai (bukan PLAYING)
+	isFinal := true
+	if gameCode == "BLACKJACK" {
+		if details, ok := gameResult.Details.(*blackjack.GameState); ok {
+			if details.GameStatus == blackjack.StatusPlaying {
+				isFinal = false
+			}
+		}
 	}
 
-	err = s.gameRepo.CreateGameSession(ctx, tx, session)
-	if err != nil {
-		return nil, err
-	}
+	if isFinal {
+		tx, err := s.gameRepo.BeginTx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer s.gameRepo.RollbackTx(tx)
 
-	err = s.walletRepo.UpdateBalance(ctx, tx, wallet.ID, balanceAfter)
-	if err != nil {
-		return nil, err
-	}
+		session := &model.GameSession{
+			ID:            uuid.New(),
+			UserID:        userID,
+			GameTypeID:    gameType.ID,
+			BetAmount:     betAmount,
+			WinAmount:     gameResult.WinAmount,
+			ResultData:    resultData,
+			BalanceBefore: balanceBefore,
+			BalanceAfter:  balanceAfter,
+			Status:        model.GameSessionStatusCompleted,
+		}
 
-	if err := s.gameRepo.CommitTx(tx); err != nil {
-		return nil, err
+		if gameResult.WinAmount > 0 {
+			session.Result = model.GameResultWin
+		} else {
+			session.Result = model.GameResultLose
+		}
+
+		err = s.gameRepo.CreateGameSession(ctx, tx, session)
+		if err != nil {
+			return nil, err
+		}
+
+		err = s.walletRepo.UpdateBalance(ctx, tx, wallet.ID, balanceAfter)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := s.gameRepo.CommitTx(tx); err != nil {
+			return nil, err
+		}
 	}
 
 	return &base.GameSessionResult{
-		SessionID: session.ID,
+		SessionID: sessionID,
 		GameCode:  gameCode,
 		BetAmount: betAmount,
 		WinAmount: gameResult.WinAmount,
-		IsWin:     gameResult.WinAmount > 0,
+		IsWin:     gameResult.IsWin,
 		Details:   gameResult.Details,
 		Balance:   balanceAfter,
 	}, nil

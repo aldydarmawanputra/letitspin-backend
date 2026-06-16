@@ -7,6 +7,7 @@ import (
 	"let-it-spin/internal/auth/middleware"
 	authRepository "let-it-spin/internal/auth/repository"
 	"let-it-spin/internal/config"
+	"let-it-spin/internal/game/blackjack"
 	"let-it-spin/internal/game/dice"
 	gameHandler "let-it-spin/internal/game/handler"
 	gameRepository "let-it-spin/internal/game/repository"
@@ -32,6 +33,7 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 	walletRepo := walletRepository.NewWalletRepository(db)
 	gameRepo := gameRepository.NewGameRepository(db)
 	configRepo := gameRepository.NewConfigRepository(db)
+	bjRepo := blackjack.NewBlackjackRepository(db)
 
 	walletSvc := walletService.NewWalletService(walletRepo)
 	gameSvc := gameService.NewGameService(gameRepo, walletRepo, walletSvc)
@@ -44,6 +46,9 @@ func SetupRouter(db *sql.DB) *gin.Engine {
 
 	rouletteEngine := roulette.NewRouletteEngine(configRepo)
 	gameSvc.RegisterEngine(rouletteEngine)
+
+	blackjackEngine := blackjack.NewBlackjackEngine(configRepo, bjRepo)
+	gameSvc.RegisterEngine(blackjackEngine)
 
 	userHandler := handler.NewUserHandler(userRepo)
 	authHandler := handler.NewAuthHandler(authRepo, jwtService)
